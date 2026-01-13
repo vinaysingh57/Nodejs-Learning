@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test POST Route</title>
+</head>
+<body>
+    <h1>Test Your Express Routes</h1>
+    
+    <!-- Test GET Route -->
+    <div>
+        <h2>GET Route Test</h2>
+        <button onclick="testGet()">Test GET /users</button>
+        <div id="getResult"></div>
+    </div>
+    
+    <!-- Test POST Route -->
+    <div>
+        <h2>POST Route Test</h2>
+        <form id="postForm">
+            <input type="text" id="name" placeholder="Enter name" required><br><br>
+            <input type="email" id="email" placeholder="Enter email" required><br><br>
+            <button type="submit">Test POST /users</button>
+        </form>
+        <div id="postResult"></div>
+    </div>
+    
+    <!-- Test PUT Route -->
+    <div>
+        <h2>PUT Route Test</h2>
+        <input type="number" id="userId" placeholder="User ID" required>
+        <button onclick="testPut()">Test PUT /users/:id</button>
+        <div id="putResult"></div>
+    </div>
+    
+    <!-- Test DELETE Route -->
+    <div>
+        <h2>DELETE Route Test</h2>
+        <input type="number" id="deleteUserId" placeholder="User ID" required>
+        <button onclick="testDelete()">Test DELETE /users/:id</button>
+        <div id="deleteResult"></div>
+    </div>
+
+    <script>
+        // Test GET route
+        async function testGet() {
+            try {
+                const response = await fetch('http://localhost:3000/users');
+                const data = await response.json();
+                document.getElementById('getResult').innerHTML = 
+                    `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                document.getElementById('getResult').innerHTML = 
+                    `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Test POST route
+        document.getElementById('postForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
+            
+            try {
+                const response = await fetch('http://localhost:3000/users', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name, email })
+                });
+                
+                const data = await response.json();
+                document.getElementById('postResult').innerHTML = 
+                    `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                document.getElementById('postResult').innerHTML = 
+                    `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        });
+        
+        // Test PUT route
+        async function testPut() {
+            const userId = document.getElementById('userId').value;
+            
+            try {
+                const response = await fetch(`http://localhost:3000/users/${userId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name: 'Updated User', email: 'updated@example.com' })
+                });
+                
+                const data = await response.json();
+                document.getElementById('putResult').innerHTML = 
+                    `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                document.getElementById('putResult').innerHTML = 
+                    `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Test DELETE route
+        async function testDelete() {
+            const userId = document.getElementById('deleteUserId').value;
+            
+            try {
+                const response = await fetch(`http://localhost:3000/users/${userId}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                document.getElementById('deleteResult').innerHTML = 
+                    `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                document.getElementById('deleteResult').innerHTML = 
+                    `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        div { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        input { padding: 5px; margin: 5px; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 5px; }
+    </style>
+</body>
+</html>
