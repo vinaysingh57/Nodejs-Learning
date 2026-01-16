@@ -29,7 +29,21 @@ const taskSchema = new mongoose.Schema({
     tags: [{
         type: String,
         trim: true
-    }]
+    }],
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
+    isPublic: {
+        type: Boolean,
+        default: false
+    },
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    }
 }, {
     timestamps: true // Automatically adds createdAt and updatedAt fields
 });
@@ -56,6 +70,14 @@ taskSchema.statics.findCompleted = function() {
 
 taskSchema.statics.findPending = function() {
     return this.find({ completed: false });
+};
+
+taskSchema.statics.findByUser = function(userId) {
+    return this.find({ createdBy: userId });
+};
+
+taskSchema.statics.findPublic = function() {
+    return this.find({ isPublic: true });
 };
 
 // Create and export the model

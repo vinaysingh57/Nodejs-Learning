@@ -2,6 +2,11 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { connectDB } = require('./mongodb-connection');
 const Task = require('../models/Task');
+const User = require('../models/User');
+const { authenticateToken } = require('../middleware/auth');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { config } = require('../config/environment');
 
 const app = express();
 const port = 3002; // Different port to avoid conflicts
@@ -17,7 +22,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     next();
 });
 
@@ -30,31 +35,160 @@ app.use((req, res, next) => {
 // Root route - API documentation
 app.get('/', (req, res) => {
     res.json({
-        message: 'MongoDB Tasks API - Learning Node.js with Database',
+        message: 'MongoDB Tasks API with JWT Authentication - Learning Node.js',
         version: '1.0.0',
+        authentication: {
+            'POST /auth/register': 'Register a new user',
+            'POST /auth/login': 'Login user and get JWT token',
+            'GET /auth/me': 'Get current user info (requires token)'
+        },
         endpoints: {
-            'GET /tasks': 'Get all tasks',
-            'POST /tasks': 'Create a new task',
-            'GET /tasks/:id': 'Get a specific task',
-            'PUT /tasks/:id': 'Update a specific task',
-            'DELETE /tasks/:id': 'Delete a specific task',
-            'GET /tasks/priority/:priority': 'Get tasks by priority (low, medium, high)',
-            'GET /tasks/completed': 'Get all completed tasks',
-            'GET /tasks/pending': 'Get all pending tasks',
-            'PATCH /tasks/:id/complete': 'Mark task as complete',
-            'PATCH /tasks/:id/incomplete': 'Mark task as incomplete'
+            'GET /tasks': 'Get all user tasks (requires token)',
+            'POST /tasks': 'Create a new task (requires token)',
+            'GET /tasks/:id': 'Get a specific task (requires token)',
+            'PUT /tasks/:id': 'Update a specific task (requires token)',
+            'DELETE /tasks/:id': 'Delete a specific task (requires token)',
+            'GET /tasks/priority/:priority': 'Get tasks by priority (requires token)',
+            'GET /tasks/completed': 'Get all completed tasks (requires token)',
+            'GET /tasks/pending': 'Get all pending tasks (requires token)',
+            'PATCH /tasks/:id/complete': 'Mark task as complete (requires token)',
+            'PATCH /tasks/:id/incomplete': 'Mark task as incomplete (requires token)'
+        },
+        usage: {
+            'Authentication': 'Send JWT token in Authorization header: Bearer <token>',
+            'Register': 'POST /auth/register with name, email, password',
+            'Login': 'POST /auth/login with email, password'
         },
         database: 'MongoDB with Mongoose ODM'
     });
 });
 
-// GET /tasks - Get all tasks with optional filtering
-app.get('/tasks', async (req, res) => {
+// Authentication Routes
+
+// POST /auth/register - Register new user
+app.post('/auth/register', async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
+        
+        // Check if user already exists
+        const existingUser = await User.findByEmail(email);
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                error: 'User already exists with this email'
+            });
+        }
+        
+        // Create new user
+        const user = new User({ name, email, password });
+        await user.save();
+        
+        // Generate JWT token
+        const token = user.generateAccessToken();
+        
+        console.log('New user registered:', user.email);
+        res.status(201).json({
+            success: true,
+            message: 'User registered successfully',
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email
+            }
+        });
+    } catch (error) {
+        console.error('Registration error:', error);
+        
+        if (error.name === 'ValidationError') {
+            const validationErrors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                success: false,
+                error: 'Validation failed',
+                details: validationErrors
+            });
+        }
+        
+        res.status(500).json({
+            success: false,
+            error: 'Server error during registration'
+        });
+    }
+});
+
+// POST /auth/login - Login user
+app.post('/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                error: 'Email and password are required'
+            });
+        }
+        
+        // Find user by email
+        const user = await User.findByEmail(email);
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid email or password'
+            });
+        }
+        
+        // Check password
+        const isPasswordValid = await user.comparePassword(password);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid email or password'
+            });
+        }
+        
+        // Generate JWT token
+        const token = user.generateAccessToken();
+        
+        console.log('User logged in:', user.email);
+        res.json({
+            success: true,
+            message: 'Login successful',
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email
+            }
+        });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Server error during login'
+        });
+    }
+});
+
+// GET /auth/me - Get current user info
+app.get('/auth/me', authenticateToken, async (req, res) => {
+    res.json({
+        success: true,
+        user: {
+            id: req.user._id,
+            name: req.user.name,
+            email: req.user.email,
+            createdAt: req.user.createdAt
+        }
+    });
+});
+
+// GET /tasks - Get all tasks with optional filtering (PROTECTED)
+app.get('/tasks', authenticateToken, async (req, res) => {
     try {
         console.log('Fetching all tasks from MongoDB...');
         
-        // Build query based on query parameters
-        let query = {};
+        // Build query based on query parameters (only user's tasks)
+        let query = { createdBy: req.user._id };
         if (req.query.completed !== undefined) {
             query.completed = req.query.completed === 'true';
         }
@@ -80,17 +214,18 @@ app.get('/tasks', async (req, res) => {
     }
 });
 
-// POST /tasks - Create a new task
-app.post('/tasks', async (req, res) => {
+// POST /tasks - Create a new task (PROTECTED)
+app.post('/tasks', authenticateToken, async (req, res) => {
     try {
-        console.log('Creating new task:', req.body);
+        console.log('Creating new task for user:', req.user.email);
         
         const taskData = {
             title: req.body.title,
             description: req.body.description,
             priority: req.body.priority || 'medium',
             dueDate: req.body.dueDate,
-            tags: req.body.tags || []
+            tags: req.body.tags || [],
+            createdBy: req.user._id // Assign task to authenticated user
         };
         
         const task = new Task(taskData);
@@ -122,12 +257,12 @@ app.post('/tasks', async (req, res) => {
     }
 });
 
-// GET /tasks/:id - Get a specific task
-app.get('/tasks/:id', async (req, res) => {
+// GET /tasks/:id - Get a specific task (PROTECTED)
+app.get('/tasks/:id', authenticateToken, async (req, res) => {
     try {
-        console.log(`Fetching task with ID: ${req.params.id}`);
+        console.log(`Fetching task with ID: ${req.params.id} for user: ${req.user.email}`);
         
-        const task = await Task.findById(req.params.id);
+        const task = await Task.findOne({ _id: req.params.id, createdBy: req.user._id });
         
         if (!task) {
             return res.status(404).json({
@@ -159,10 +294,10 @@ app.get('/tasks/:id', async (req, res) => {
     }
 });
 
-// PUT /tasks/:id - Update a specific task
-app.put('/tasks/:id', async (req, res) => {
+// PUT /tasks/:id - Update a specific task (PROTECTED)
+app.put('/tasks/:id', authenticateToken, async (req, res) => {
     try {
-        console.log(`Updating task with ID: ${req.params.id}`);
+        console.log(`Updating task with ID: ${req.params.id} for user: ${req.user.email}`);
         
         const updateData = {
             title: req.body.title,
@@ -180,8 +315,8 @@ app.put('/tasks/:id', async (req, res) => {
             }
         });
         
-        const task = await Task.findByIdAndUpdate(
-            req.params.id,
+        const task = await Task.findOneAndUpdate(
+            { _id: req.params.id, createdBy: req.user._id }, // Only allow updating own tasks
             updateData,
             { 
                 new: true,        // Return updated document
@@ -229,12 +364,12 @@ app.put('/tasks/:id', async (req, res) => {
     }
 });
 
-// DELETE /tasks/:id - Delete a specific task
-app.delete('/tasks/:id', async (req, res) => {
+// DELETE /tasks/:id - Delete a specific task (PROTECTED)
+app.delete('/tasks/:id', authenticateToken, async (req, res) => {
     try {
-        console.log(`Deleting task with ID: ${req.params.id}`);
+        console.log(`Deleting task with ID: ${req.params.id} for user: ${req.user.email}`);
         
-        const task = await Task.findByIdAndDelete(req.params.id);
+        const task = await Task.findOneAndDelete({ _id: req.params.id, createdBy: req.user._id });
         
         if (!task) {
             return res.status(404).json({
@@ -267,11 +402,11 @@ app.delete('/tasks/:id', async (req, res) => {
     }
 });
 
-// GET /tasks/priority/:priority - Get tasks by priority
-app.get('/tasks/priority/:priority', async (req, res) => {
+// GET /tasks/priority/:priority - Get tasks by priority (PROTECTED)
+app.get('/tasks/priority/:priority', authenticateToken, async (req, res) => {
     try {
         const priority = req.params.priority.toLowerCase();
-        console.log(`Fetching ${priority} priority tasks`);
+        console.log(`Fetching ${priority} priority tasks for user: ${req.user.email}`);
         
         if (!['low', 'medium', 'high'].includes(priority)) {
             return res.status(400).json({
@@ -280,7 +415,7 @@ app.get('/tasks/priority/:priority', async (req, res) => {
             });
         }
         
-        const tasks = await Task.findByPriority(priority);
+        const tasks = await Task.find({ priority: priority, createdBy: req.user._id });
         
         console.log(`Found ${tasks.length} ${priority} priority tasks`);
         res.json({
@@ -299,12 +434,12 @@ app.get('/tasks/priority/:priority', async (req, res) => {
     }
 });
 
-// GET /tasks/completed - Get all completed tasks
-app.get('/tasks/completed', async (req, res) => {
+// GET /tasks/completed - Get all completed tasks (PROTECTED)
+app.get('/tasks/completed', authenticateToken, async (req, res) => {
     try {
-        console.log('Fetching completed tasks');
+        console.log(`Fetching completed tasks for user: ${req.user.email}`);
         
-        const tasks = await Task.findCompleted();
+        const tasks = await Task.find({ completed: true, createdBy: req.user._id });
         
         console.log(`Found ${tasks.length} completed tasks`);
         res.json({
@@ -322,12 +457,12 @@ app.get('/tasks/completed', async (req, res) => {
     }
 });
 
-// GET /tasks/pending - Get all pending tasks
-app.get('/tasks/pending', async (req, res) => {
+// GET /tasks/pending - Get all pending tasks (PROTECTED)
+app.get('/tasks/pending', authenticateToken, async (req, res) => {
     try {
-        console.log('Fetching pending tasks');
+        console.log(`Fetching pending tasks for user: ${req.user.email}`);
         
-        const tasks = await Task.findPending();
+        const tasks = await Task.find({ completed: false, createdBy: req.user._id });
         
         console.log(`Found ${tasks.length} pending tasks`);
         res.json({
@@ -345,12 +480,12 @@ app.get('/tasks/pending', async (req, res) => {
     }
 });
 
-// PATCH /tasks/:id/complete - Mark task as complete
-app.patch('/tasks/:id/complete', async (req, res) => {
+// PATCH /tasks/:id/complete - Mark task as complete (PROTECTED)
+app.patch('/tasks/:id/complete', authenticateToken, async (req, res) => {
     try {
-        console.log(`Marking task ${req.params.id} as complete`);
+        console.log(`Marking task ${req.params.id} as complete for user: ${req.user.email}`);
         
-        const task = await Task.findById(req.params.id);
+        const task = await Task.findOne({ _id: req.params.id, createdBy: req.user._id });
         
         if (!task) {
             return res.status(404).json({
@@ -385,12 +520,12 @@ app.patch('/tasks/:id/complete', async (req, res) => {
     }
 });
 
-// PATCH /tasks/:id/incomplete - Mark task as incomplete
-app.patch('/tasks/:id/incomplete', async (req, res) => {
+// PATCH /tasks/:id/incomplete - Mark task as incomplete (PROTECTED)
+app.patch('/tasks/:id/incomplete', authenticateToken, async (req, res) => {
     try {
-        console.log(`Marking task ${req.params.id} as incomplete`);
+        console.log(`Marking task ${req.params.id} as incomplete for user: ${req.user.email}`);
         
-        const task = await Task.findById(req.params.id);
+        const task = await Task.findOne({ _id: req.params.id, createdBy: req.user._id });
         
         if (!task) {
             return res.status(404).json({

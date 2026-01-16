@@ -1,11 +1,11 @@
 const mongoose = require('mongoose');
+const { config } = require('../config/environment');
 
 // MongoDB connection function
 const connectDB = async () => {
     try {
-        // Connect to MongoDB (local installation)
-        // Default MongoDB URL for local installation
-        const conn = await mongoose.connect('mongodb://localhost:27017/node-learning');
+        // Connect to MongoDB using environment variables
+        const conn = await mongoose.connect(config.database.uri);
 
         console.log(`MongoDB Connected: ${conn.connection.host}`);
         console.log(`Database Name: ${conn.connection.name}`);
